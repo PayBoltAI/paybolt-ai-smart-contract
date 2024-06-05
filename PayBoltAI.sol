@@ -220,6 +220,7 @@ contract PayBoltAI is ERC20, Ownable {
     event FeePointsOnBuyChanged(uint newFeePoints); 
     event FeePointsOnSellChanged(uint newFeePoints); 
     event FeePointsOnReflectionChanged(uint newFeePoints); 
+    event MinimumTokensBeforeSwapChanged(uint newMinimum); 
     event ExemptFee(address account);
     event RevokeFeeExemption(address account);
 
@@ -233,6 +234,8 @@ contract PayBoltAI is ERC20, Ownable {
     uint public feePointsOnSell; 
     uint public feePointsOnReflection; 
     uint public totalFeePoints; 
+    uint public minimumTokensBeforeSwap; 
+
     address public feeRecipient;
     address public reflectionFeeRecipient;
 
@@ -244,10 +247,13 @@ contract PayBoltAI is ERC20, Ownable {
         totalFeePoints = 1_000;
         feePointsOnBuy = 300; 
         feePointsOnSell = 700; 
-        feeRecipient = 0x3F277603d338cCDa2fB1Da6505Df05A77971F572; 
-        reflectionFeeRecipient = 0x3F277603d338cCDa2fB1Da6505Df05A77971F572; 
+        feePointsOnReflection = 140;
+        minimumTokensBeforeSwap = 250_000 * 10**decimals();
 
-        IRouter _router = IRouter(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
+        feeRecipient = 0xd65e6E66adDBD06c313c9C9024f42565D2B66dF5; 
+        reflectionFeeRecipient = 0x2e48771C9316a1361100737B861d20aF65433a18; 
+
+        IRouter _router = IRouter(0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24);
         address _pair = IFactory(_router.factory()).createPair(address(this), _router.WETH());
         router = _router;
         pair = _pair;
@@ -297,6 +303,12 @@ contract PayBoltAI is ERC20, Ownable {
         emit FeePointsOnReflectionChanged(newFeePointsOnReflection);
     }
 
+    function updateMinimumTokensBeforeSwap(uint newMinimumTokensBeforeSwap) public onlyOwner {
+        require(newMinimumTokensBeforeSwap >= (1_000 * 10**decimals()), "New minimumTokensBeforeSwap must be at least 1,000 * 10**18");
+        minimumTokensBeforeSwap = newMinimumTokensBeforeSwap;
+        emit MinimumTokensBeforeSwapChanged(newMinimumTokensBeforeSwap);
+    }
+
     function exemptFee(address account) public onlyOwner {
         require(!_feeExemption[account], "Account is already exempted");
         _feeExemption[account] = true;
@@ -331,21 +343,18 @@ contract PayBoltAI is ERC20, Ownable {
                 super._transfer(from, address(this), fees);
             }
 
-            if (from != pair) {
-                liquify();
+            uint contractTokenBalance = balanceOf(address(this));
+            if (
+                from != pair && 
+                contractTokenBalance >= minimumTokensBeforeSwap && 
+                !_swapping
+            ) {
+                _swapping = true; 
+                swapTokensForEth(contractTokenBalance);
+                _swapping = false; 
             }
                 
             super._transfer(from, to, amount);
-        }
-    }
-
-    function liquify() private {
-        uint toSwap = balanceOf(address(this));
-
-        if (toSwap > 0 && !_swapping) {
-            _swapping = true; 
-            swapTokensForEth(toSwap);
-            _swapping = false; 
         }
     }
 
